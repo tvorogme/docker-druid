@@ -2,8 +2,13 @@ FROM ubuntu:16.04
 
 # Set version and github repo which you want to build from
 ENV GITHUB_OWNER druid-io
-ENV DRUID_VERSION 0.12.0
-ENV ZOOKEEPER_VERSION 3.4.12
+ENV DRUID_VERSION 0.12.3
+ENV ZOOKEEPER_VERSION 3.4.13
+ENV POSTGRES_VERSION 9.5
+ENV SCALA_VERSION 2.12.8
+ENV SBT_VERSION 1.2.8
+ENV MAVEN_VERSION 3.6.0
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Java 8
 RUN apt-get update \
@@ -21,9 +26,24 @@ RUN apt-get update \
       && rm -rf /var/cache/oracle-jdk8-installer \
       && rm -rf /var/lib/apt/lists/*
 
+# Scala
+RUN wget -q -O - https://downloads.typesafe.com/scala/$SCALA_VERSION/scala-$SCALA_VERSION.tgz | tar -xzf - -C /usr/local
+
+# sbt
+RUN wget -q -O sbt-$SBT_VERSION.deb https://dl.bintray.com/sbt/debian/sbt-$SBT_VERSION.deb \
+      && dpkg -i sbt-$SBT_VERSION.deb \
+      && rm sbt-$SBT_VERSION.deb \
+      && sbt sbtVersion \
+      && mkdir project \
+      && echo "scalaVersion := \"${SCALA_VERSION}\"" > build.sbt \
+      && echo "sbt.version=${SBT_VERSION}" > project/build.properties \
+      && echo "case object Temp" > Temp.scala \
+      && sbt compile \
+      && rm -r project && rm build.sbt && rm Temp.scala && rm -r target
+
 # Maven
-RUN wget -q -O - http://archive.apache.org/dist/maven/maven-3/3.3.9/binaries/apache-maven-3.3.9-bin.tar.gz | tar -xzf - -C /usr/local \
-      && ln -s /usr/local/apache-maven-3.3.9 /usr/local/apache-maven \
+RUN wget -q -O - http://archive.apache.org/dist/maven/maven-3/$MAVEN_VERSION/binaries/apache-maven-$MAVEN_VERSION-bin.tar.gz | tar -xzf - -C /usr/local \
+      && ln -s /usr/local/apache-maven-$MAVEN_VERSION /usr/local/apache-maven \
       && ln -s /usr/local/apache-maven/bin/mvn /usr/local/bin/mvn
 
 # Zookeeper
@@ -62,7 +82,7 @@ RUN mvn -U -B org.codehaus.mojo:versions-maven-plugin:2.1:set -DgenerateBackupPo
 
 WORKDIR /
 
-# Run the rest of the commands as the ``postgres`` user created by the ``postgres-9.3`` package when it was ``apt-get installed``
+# Run the rest of the commands as the ``postgres`` user created by the ``postgres-xx`` package when it was ``apt-get installed``
 USER postgres
 
 # Create a PostgreSQL role named ``docker`` with ``docker`` as the password and
@@ -73,12 +93,11 @@ RUN /etc/init.d/postgresql start &&\
     psql --command "CREATE USER druid WITH SUPERUSER PASSWORD 'diurd';" &&\
     createdb -O druid druid
 
-# Adjust PostgreSQL configuration so that remote connections to the
-# database are possible.
-RUN echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/9.5/main/pg_hba.conf
+# Adjust PostgreSQL configuration so that remote connections to the database are possible.
+RUN echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/$POSTGRES_VERSION/main/pg_hba.conf
 
-# And add ``listen_addresses`` to ``/etc/postgresql/9.3/main/postgresql.conf``
-RUN echo "listen_addresses='*'" >> /etc/postgresql/9.5/main/postgresql.conf
+# And add ``listen_addresses`` to ``/etc/postgresql/xx/main/postgresql.conf``
+RUN echo "listen_addresses='*'" >> /etc/postgresql/$POSTGRES_VERSION/main/postgresql.conf
 
 USER root
 
@@ -94,7 +113,7 @@ RUN /etc/init.d/postgresql start \
       && /etc/init.d/postgresql stop
 
 # Setup supervisord
-ADD supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Expose ports:
 # - 8081: HTTP (coordinator)
@@ -107,7 +126,7 @@ EXPOSE 8081
 EXPOSE 8082
 EXPOSE 8083
 EXPOSE 8090
-EXPOSE 3306
+EXPOSE 5432
 EXPOSE 2181 2888 3888
 
 # Mount the data inside of the container
@@ -119,11 +138,12 @@ WORKDIR /var/lib/druid
 # Start Druid, and run an ingestion job, wait until the job is done and data is a available, then shut Druid down
 RUN mkdir -p /tmp/druid/localStorage/ \
  && chown druid:druid /tmp/druid/localStorage/ \
+ && pip install -r /ingestion/requirements.txt \
  && cat /etc/supervisor/conf.d/supervisord.conf | sed 's/nodaemon=true/nodaemon=false/g' > /tmp/supervisord-no-deamon.conf \
  && export HOSTIP="$(hostname -i)" && /usr/bin/supervisord -c /tmp/supervisord-no-deamon.conf \
- && pip install -r /ingestion/requirements.txt \
  && /ingestion/provision.py --file /ingestion/wikiticker-index.json \
  && supervisorctl -c /etc/supervisor/conf.d/supervisord.conf shutdown
 
+LABEL com.circleci.preserve-entrypoint=true
 
 CMD export HOSTIP="$(hostname -i)" && exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
