@@ -2,8 +2,8 @@ FROM ubuntu:16.04
 
 # Set version and github repo which you want to build from
 ENV GITHUB_OWNER druid-io
-ENV DRUID_VERSION 0.12.3
-ENV ZOOKEEPER_VERSION 3.4.13
+ENV DRUID_VERSION 0.14.0-incubating
+ENV ZOOKEEPER_VERSION 3.4.14
 ENV POSTGRES_VERSION 9.5
 ENV SCALA_VERSION 2.12.8
 ENV SBT_VERSION 1.2.8
@@ -133,16 +133,6 @@ EXPOSE 2181 2888 3888
 ADD ./ingestion/ /ingestion/
 
 WORKDIR /var/lib/druid
-
-# Create directories used for storing the segments
-# Start Druid, and run an ingestion job, wait until the job is done and data is a available, then shut Druid down
-RUN mkdir -p /tmp/druid/localStorage/ \
- && chown druid:druid /tmp/druid/localStorage/ \
- && pip install -r /ingestion/requirements.txt \
- && cat /etc/supervisor/conf.d/supervisord.conf | sed 's/nodaemon=true/nodaemon=false/g' > /tmp/supervisord-no-deamon.conf \
- && export HOSTIP="$(hostname -i)" && /usr/bin/supervisord -c /tmp/supervisord-no-deamon.conf \
- && /ingestion/provision.py --file /ingestion/wikiticker-index.json \
- && supervisorctl -c /etc/supervisor/conf.d/supervisord.conf shutdown
 
 LABEL com.circleci.preserve-entrypoint=true
 
