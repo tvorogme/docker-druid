@@ -1,9 +1,9 @@
 FROM ubuntu:16.04
 
 # Set version and github repo which you want to build from
-ENV GITHUB_OWNER druid-io
-ENV DRUID_VERSION 0.12.3
-ENV ZOOKEEPER_VERSION 3.4.13
+ENV GITHUB_OWNER apache
+ENV DRUID_VERSION 0.14.0-incubating
+ENV ZOOKEEPER_VERSION 3.4.14
 ENV POSTGRES_VERSION 9.5
 ENV SCALA_VERSION 2.12.8
 ENV SBT_VERSION 1.2.8
@@ -69,12 +69,16 @@ WORKDIR /tmp/druid
 
 # package and install Druid locally
 # use versions-maven-plugin 2.1 to work around https://jira.codehaus.org/browse/MVERSIONS-285
-RUN mvn -U -B org.codehaus.mojo:versions-maven-plugin:2.1:set -DgenerateBackupPoms=false -DnewVersion=$DRUID_VERSION \
-  && mvn -U -B install -DskipTests=true -Dmaven.javadoc.skip=true \
-  && cp services/target/druid-services-$DRUID_VERSION-selfcontained.jar /usr/local/druid/lib \
-  && cp -r distribution/target/extensions /usr/local/druid/ \
-  && cp -r distribution/target/hadoop-dependencies /usr/local/druid/ \
-  && apt-get purge --auto-remove -y git \
+#RUN mvn -U -B org.codehaus.mojo:versions-maven-plugin:2.1:set -DgenerateBackupPoms=false -DnewVersion=$DRUID_VERSION \
+#  && mvn -U -B install -DskipTests=true -Dmaven.javadoc.skip=true \
+#  && cp services/target/druid-services-$DRUID_VERSION-selfcontained.jar /usr/local/druid/lib \
+#  && cp -r distribution/target/extensions /usr/local/druid/ \
+#  && cp -r distribution/target/hadoop-dependencies /usr/local/druid/
+
+RUN mvn clean install -Papache-release,dist,rat -DskipTests
+RUN ls
+
+RUN apt-get purge --auto-remove -y git \
   && apt-get clean \
   && rm -rf /tmp/* \
             /var/tmp/* \
