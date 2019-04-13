@@ -1,7 +1,7 @@
 FROM ubuntu:16.04
 
 # Set version and github repo which you want to build from
-ENV GITHUB_OWNER druid-io
+ENV GITHUB_OWNER apache
 ENV DRUID_VERSION 0.14.0-incubating
 ENV ZOOKEEPER_VERSION 3.4.14
 ENV POSTGRES_VERSION 9.5
@@ -63,16 +63,26 @@ RUN adduser --system --group --no-create-home druid \
 RUN mkdir -p /usr/local/druid/lib
 
 # trigger rebuild only if branch changed
-ADD https://api.github.com/repos/$GITHUB_OWNER/druid/git/refs/heads/$DRUID_VERSION druid-version.json
-RUN git clone -q --branch $DRUID_VERSION --depth 1 https://github.com/$GITHUB_OWNER/druid.git /tmp/druid
+ADD https://api.github.com/repos/$GITHUB_OWNER/incubator-druid/git/refs/heads/$DRUID_VERSION druid-version.json
+RUN git clone -q --branch $DRUID_VERSION --depth 1 https://github.com/$GITHUB_OWNER/incubator-druid.git /tmp/druid
 WORKDIR /tmp/druid
+RUN ls | head
 
 # package and install Druid locally
 # use versions-maven-plugin 2.1 to work around https://jira.codehaus.org/browse/MVERSIONS-285
-RUN mvn -U -B org.codehaus.mojo:versions-maven-plugin:2.1:set -DgenerateBackupPoms=false -DnewVersion=$DRUID_VERSION \
-  && mvn -U -B install -DskipTests=true -Dmaven.javadoc.skip=true \
-  && cp services/target/druid-services-$DRUID_VERSION-selfcontained.jar /usr/local/druid/lib \
-  && apt-get purge --auto-remove -y git \
+#RUN mvn -U -B org.codehaus.mojo:versions-maven-plugin:2.1:set -DgenerateBackupPoms=false -DnewVersion=$DRUID_VERSION \
+#  && mvn -U -B install -DskipTests=true -Dmaven.javadoc.skip=true \
+#  && cp services/target/druid-services-$DRUID_VERSION-selfcontained.jar /usr/local/druid/lib \
+#  && cp -r distribution/target/extensions /usr/local/druid/ \
+#  && cp -r distribution/target/hadoop-dependencies /usr/local/druid/
+
+RUN mvn clean install -DskipTests -Dmaven.javadoc.skip=true
+RUN ls
+RUN cp services/target/* /usr/local/druid/lib
+RUN cp -r distribution/target/extensions /usr/local/druid/ \
+    && cp -r distribution/target/hadoop-dependencies /usr/local/druid/
+
+RUN apt-get purge --auto-remove -y git \
   && apt-get clean \
   && rm -rf /tmp/* \
             /var/tmp/* \
@@ -131,6 +141,16 @@ EXPOSE 2181 2888 3888
 ADD ./ingestion/ /ingestion/
 
 WORKDIR /var/lib/druid
+
+# Create directories used for storing the segments
+# Start Druid, and run an ingestion job, wait until the job is done and data is a available, then shut Druid down
+RUN mkdir -p /tmp/druid/localStorage/ \
+ && chown druid:druid /tmp/druid/localStorage/ \
+ && pip install -r /ingestion/requirements.txt \
+ && cat /etc/supervisor/conf.d/supervisord.conf | sed 's/nodaemon=true/nodaemon=false/g' > /tmp/supervisord-no-deamon.conf \
+ && export HOSTIP="$(hostname -i)" && /usr/bin/supervisord -c /tmp/supervisord-no-deamon.conf \
+ && /ingestion/provision.py --file /ingestion/wikiticker-index.json \
+ && supervisorctl -c /etc/supervisor/conf.d/supervisord.conf shutdown
 
 LABEL com.circleci.preserve-entrypoint=true
 
